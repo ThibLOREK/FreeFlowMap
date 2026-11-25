@@ -7,7 +7,7 @@
     "version": "1.0.0.0",
     "description": "Cartographie de flux GPS directionnels",
     "supportUrl": "https://example.com/support",
-    "gitHubUrl": "https://example.com/repo"
+    "gitHubUrl": "https://github.com/ThibLOREK/FreeFlowMap"
   },
   "apiVersion": "5.11.1",
   "author": {

@@ -1,79 +1,57 @@
 {
-    "dataRoles": [
+    "privileges": [
         {
-            "displayName": "Category Data",
-            "name": "category",
-            "kind": "Grouping"
-        },
-        {
-            "displayName": "Measure Data",
-            "name": "measure",
-            "kind": "Measure"
+            "name": "WebAccess",
+            "essential": true,
+            "parameters": [
+                "https://tiles.openfreemap.org"
+            ]
         }
     ],
+    "dataRoles": [
+        { "displayName": "Latitude départ", "name": "latStart", "kind": "Grouping" },
+        { "displayName": "Longitude départ", "name": "lonStart", "kind": "Grouping" },
+        { "displayName": "Latitude arrivée", "name": "latEnd", "kind": "Grouping" },
+        { "displayName": "Longitude arrivée", "name": "lonEnd", "kind": "Grouping" },
+        { "displayName": "Valeur quantitative", "name": "value", "kind": "Measure" },
+        { "displayName": "Identifiant du flux", "name": "flowId", "kind": "Grouping" },
+        { "displayName": "Catégorie", "name": "category", "kind": "Grouping" }
+    ],
     "objects": {
-        "dataPoint": {
+        "map": {
+            "displayName": "Carte",
             "properties": {
-                "defaultColor": {
-                    "type": {
-                        "fill": {
-                            "solid": {
-                                "color": true
-                            }
-                        }
-                    }
+                "styleUrl": {
+                    "displayName": "URL du style",
+                    "type": { "text": true }
                 },
-                "showAllDataPoints": {
-                    "type": {
-                        "bool": true
-                    }
+                "initialZoom": {
+                    "displayName": "Zoom initial",
+                    "type": { "numeric": true }
                 },
-                "fill": {
-                    "type": {
-                        "fill": {
-                            "solid": {
-                                "color": true
-                            }
-                        }
-                    }
-                },
-                "fillRule": {
-                    "type": {
-                        "fill": {}
-                    }
-                },
-                 "fontSize": {
-                    "type": {
-                        "formatting": {
-                            "fontSize": true
-                        }
-                    }
+                "autoZoom": {
+                    "displayName": "Zoom automatique",
+                    "type": { "bool": true }
                 }
             }
         }
     },
     "dataViewMappings": [
         {
-            "categorical": {
-                "categories": {
-                    "for": {
-                        "in": "category"
-                    },
-                    "dataReductionAlgorithm": {
-                        "top": {}
-                    }
-                },
-                "values": {
+            "table": {
+                "rows": {
                     "select": [
-                        {
-                            "bind": {
-                                "to": "measure"
-                            }
-                        }
-                    ]
+                        { "for": { "in": "latStart" } },
+                        { "for": { "in": "lonStart" } },
+                        { "for": { "in": "latEnd" } },
+                        { "for": { "in": "lonEnd" } },
+                        { "for": { "in": "value" } },
+                        { "for": { "in": "flowId" } },
+                        { "for": { "in": "category" } }
+                    ],
+                    "dataReductionAlgorithm": { "window": { "count": 30000 } }
                 }
             }
         }
-    ],
-    "privileges": []
+    ]
 }
