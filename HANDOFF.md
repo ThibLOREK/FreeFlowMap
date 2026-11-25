@@ -12,7 +12,9 @@ Document de reprise destiné à un LLM (ou un développeur) qui doit continuer c
 4. Toute limitation liée à Power BI doit être signalée clairement, avec une solution alternative.
 5. Ne pas intégrer de clé API fictive. Le fournisseur de tuiles doit être configurable.
 6. Éviter les dépendances inutiles. Code modulaire, propre, documenté.
-7. L'environnement de développement de l'assistant est Linux, **sans Power BI Desktop** : tout ce qui dépend du sandbox Power BI (worker `blob:`, WebGL, réseau, interactions natives) est **non vérifiable** côté assistant et doit être testé par l'utilisateur.
+7. L'environnement de développement de l'assistant n'a **pas Power BI Desktop** : tout ce qui dépend du sandbox Power BI (worker `blob:`, WebGL, réseau, interactions natives) est **non vérifiable** côté assistant et doit être testé par l'utilisateur.
+8. Messages de commit en français, à l'impératif. Jamais de `git push --force`, de réécriture d'historique ni de suppression de branche sans accord.
+9. Pas de commit de `node_modules/`, `.tmp/`, `dist/`, `webpack.statistics.prod.html` (ignorés par `.gitignore`).
 
 ---
 
@@ -122,6 +124,8 @@ style/
 capabilities.json, pbiviz.json, package.json, tsconfig.json, README.md
 ```
 
+Les fichiers de `data/`, `flows/` et `interactions/` sont créés avec leur étape (pas de squelettes vides en avance).
+
 ### 2.11 Livrables finaux
 
 Projet source complet ; tous les fichiers TypeScript ; fichiers de config Power BI ; `.pbiviz` compilé ; jeu de données de démonstration ; documentation d'installation ; documentation du paramétrage des champs ; documentation des limites techniques.
@@ -136,15 +140,15 @@ Projet source complet ; tous les fichiers TypeScript ; fichiers de config Power 
 
 | Étape | Contenu | État |
 |---|---|---|
-| 1 | Architecture technique + compatibilité des bibliothèques avec le SDK | **Terminée** (validée en compilation, voir §4) |
-| 2 | Création du projet structuré + fond cartographique | **À faire — attend la validation de l'utilisateur** |
+| 1 | Architecture technique + compatibilité des bibliothèques avec le SDK | **Terminée** (compilation validée, voir §4) |
+| 2 | Projet structuré + fond cartographique | **Code poussé sur `main` (commit `fec87e7`), NON compilé, NON testé.** En attente des sorties de compilation et du test Desktop de l'utilisateur (voir §9 et §10) |
 | 3 | Flux GPS et flèches directionnelles | À faire |
 | 4 | Algorithme de courbure et gestion des superpositions | À faire |
 | 5 | Épaisseur normalisée | À faire |
 | 6 | Interactions Power BI et paramètres (formatage) | À faire |
 | 7 | Tests et génération du `.pbiviz` final | À faire |
 
-**Prochaine action : étape 2**, une fois que l'utilisateur a répondu (ou accepté les valeurs par défaut) aux trois points de la section 6.
+**Prochaine action** : récupérer les sorties de `npm install`, `tsc`, `npm run lint`, `npm run package` de l'utilisateur sur le code de l'étape 2 et corriger les erreurs éventuelles ; puis son retour du test Desktop ; ensuite seulement, attendre sa validation avant l'étape 3.
 
 ---
 
@@ -155,7 +159,6 @@ Projet source complet ; tous les fichiers TypeScript ; fichiers de config Power 
 - Node 22.23.5, npm 10.9.9 (les outils Power BI exigent Node ≥ 20.19).
 - `powerbi-visuals-tools` 7.2.1 installé globalement (`pbiviz`).
 - Projet de test créé avec `pbiviz new FlowMap --template default` (l'outil a normalisé le dossier en **`flowMap`**).
-- Répertoire de travail utilisé : `/home/claude/work/flowMap` (peut ne pas persister ; l'utilisateur a reçu un zip des sources et le `.pbiviz` de test).
 
 ### 4.2 Versions validées (installées et compilées ensemble)
 
@@ -165,43 +168,33 @@ Projet source complet ; tous les fichiers TypeScript ; fichiers de config Power 
 | powerbi-visuals-api | 5.11.1 | fixée par le gabarit |
 | TypeScript | **5.5.4** | fixé par le gabarit ; la 7.0.2 existe sur npm mais **n'a pas été validée** avec ces outils : ne pas l'utiliser sans test |
 | D3 / @types/d3 | 7.9.0 / 7.4.3 | |
-| MapLibre GL JS | 6.19.0 | |
+| MapLibre GL JS | 6.19.0 (`^6.19.0` dans package.json, figée par package-lock.json) | |
 | powerbi-visuals-utils-formattingmodel | 6.0.4 | |
-| powerbi-visuals-utils-interactivityutils | 6.0.4 | |
+| powerbi-visuals-utils-interactivityutils | 6.0.4 | déclaré « deprecated » par npm (voir §4.6) |
 | powerbi-visuals-utils-tooltiputils | 7.1.0 | |
 
-### 4.3 Résultat du test
+### 4.3 Résultat du test (étape 1)
 
 Un visuel minimal (MapLibre + D3 + worker embarqué) **compile et se package** : `.pbiviz` de ~464 Ko. **Non testé dans Power BI Desktop.**
 
-### 4.4 Pièges découverts (déjà résolus dans le projet de test)
+### 4.4 Pièges découverts (déjà résolus)
 
 1. **MapLibre 6.x : pas d'export par défaut.** Utiliser `import * as maplibregl from "maplibre-gl";` (l'import par défaut échoue : `TS1192`).
-2. **Le worker MapLibre ne peut pas être servi à côté du visuel** (un visuel = un seul bundle). Solution retenue : `node_modules/maplibre-gl/dist/maplibre-gl-worker.mjs` (~550 Ko, autonome) est lu par un script et converti en chaîne dans `src/workerSource.ts` (`export const WORKER_SOURCE: string = "..."`), puis :
-   ```ts
-   const url = URL.createObjectURL(new Blob([WORKER_SOURCE], { type: "text/javascript" }));
-   maplibregl.setWorkerUrl(url);
-   ```
-   Script de génération (à transformer en étape de pré-build npm, ex. `"prepackage"` / `"prestart"`) :
-   ```js
-   import { readFileSync, writeFileSync } from "node:fs";
-   const src = readFileSync("node_modules/maplibre-gl/dist/maplibre-gl-worker.mjs", "utf8");
-   writeFileSync("src/workerSource.ts", "export const WORKER_SOURCE: string = " + JSON.stringify(src) + ";\n");
-   ```
-   Les fichiers `maplibre-gl-shared*.mjs` sont vides (0 octet) dans cette version : ils n'ont pas posé de problème.
-3. **`tsconfig.json`** : ajout de `"moduleResolution": "bundler"`, `"module": "esnext"`, `"esModuleInterop": true`, `"skipLibCheck": true`.
-4. **`pbiviz package` exige** dans `pbiviz.json` : `author.name`, `author.email`, `visual.supportUrl` (et `gitHubUrl` si présent). Valeurs actuelles **provisoires** (« A renseigner », `a-renseigner@example.com`, `https://example.com/support`, `https://example.com/repo`). À remplacer par celles de l'utilisateur.
-5. `webpack.statistics.prod.html` est généré à chaque `package` (à ignorer / mettre dans `.gitignore`, comme `.tmp/`, `dist/`, `node_modules/`).
-6. `pbiviz package` affiche des avertissements « optional features » (Color Palette, Context Menu, High Contrast, Highlight Data, Keyboard Navigation, Landing Page, Localizations, Rendering Events, Selection Across Visuals, Tooltips) : ce sont des fonctionnalités à déclarer dans `capabilities.json` / à implémenter, **pas des erreurs**. Plusieurs sont directement utiles ici (Tooltips, Highlight Data, Context Menu, Rendering Events, Selection Across Visuals).
+2. **Le worker MapLibre ne peut pas être servi à côté du visuel** (un visuel = un seul bundle). Solution : `node_modules/maplibre-gl/dist/maplibre-gl-worker.mjs` (~550 Ko, autonome) est converti en chaîne dans `src/workerSource.ts` par `scripts/gen-worker.mjs`, puis chargé via `URL.createObjectURL(new Blob([WORKER_SOURCE]))` et `maplibregl.setWorkerUrl(url)`. Les fichiers `maplibre-gl-shared*.mjs` sont vides (0 octet) : pas de problème constaté.
+3. **`tsconfig.json`** : `"moduleResolution": "bundler"`, `"module": "esnext"`, `"esModuleInterop": true`, `"skipLibCheck": true`.
+4. **`pbiviz package` exige** dans `pbiviz.json` : `author.name`, `author.email`, `visual.supportUrl`. Valeurs actuelles **provisoires** (« A renseigner », `a-renseigner@example.com`, `https://example.com/support`) : l'utilisateur a demandé de ne rien mettre pour le moment. `gitHubUrl` pointe désormais vers le dépôt réel.
+5. `webpack.statistics.prod.html` est généré à chaque `package` : retiré du dépôt et listé dans `.gitignore`.
+6. `pbiviz package` affiche des avertissements « optional features » (Allow Interactions, Color Palette, Context Menu, High Contrast, Highlight Data, Keyboard Navigation, Landing Page, Localizations, Rendering Events, Selection Across Visuals, Tooltips) : fonctionnalités à déclarer/implémenter, **pas des erreurs**. Plusieurs sont utiles ici (Tooltips, Highlight Data, Context Menu, Rendering Events, Selection Across Visuals).
 
-### 4.5 État actuel des fichiers du projet de test
+### 4.5 Vérification de la base (25/11/2026, machine de l'utilisateur, Windows)
 
-- `src/visual.ts` : minimal (charge le worker, crée une `maplibregl.Map` avec un style vide, ajoute un `<svg>` D3). **Aucune logique de flux.**
-- `src/settings.ts` : **supprimé** (à recréer à l'étape 6 avec `powerbi-visuals-utils-formattingmodel`).
-- `src/workerSource.ts` : worker embarqué (~554 Ko).
-- `capabilities.json` : **encore celui du gabarit** (rôles `category` / `measure`) — à remplacer entièrement.
-- `package.json` : nom `visual`, description du gabarit — à corriger.
-- GUID du visuel (pbiviz.json) : `flowMapA42796B9945249CBB594ECF68C0A3B5F` ; `visualClassName: "Visual"` ; `apiVersion: 5.11.1`.
+Avant les modifications de l'étape 2, l'utilisateur a exécuté avec succès : `npm install` (0 vulnérabilité), `npx tsc -v` (5.5.4), `npx tsc --noEmit -p tsconfig.json` (aucune erreur), `npm run lint` (aucune erreur), `pbiviz package` (« Build completed successfully », `.pbiviz` créé). Environnement : Node v26.13.1, npm 11.20.0, Git 2.51.0, powerbi-visuals-tools 7.2.1 (donc **plus récents que Node 22 / npm 10 de l'étape 1, sans problème constaté**).
+
+Messages observés, non bloquants :
+
+- `Create certificate error: 'pwsh' n'est pas reconnu` : `pbiviz` tente de générer un certificat de développement via PowerShell 7 (`pwsh`). Sans effet sur `package`. Concerne `pbiviz start` ; installer PowerShell 7 si besoin.
+- `error Some features are going to be required soon ... Format Pane` : le visuel doit déclarer/implémenter le nouveau volet de format (`getFormattingModel`). L'étape 2 l'implémente ; **à confirmer** par un nouveau `package`.
+- npm : `powerbi-visuals-utils-interactivityutils@6.0.4` marqué « no longer supported » et `eslint@9.39.5` « no longer supported ». À traiter à l'étape 6 (interactions) ; ne pas changer de version sans test.
 
 ---
 
@@ -222,74 +215,97 @@ Power BI (dataView, filtres, formatage)
 Décisions clés :
 
 - **MapLibre sous le visuel**, une **couche D3/SVG superposée** pour les flux, recalculée à chaque événement `move` / `zoom` / `resize` de la carte.
-- **Géométrie calculée en pixels après projection**, avec décalages latéraux en pixels : la séparation reste constante au zoom, et les points GPS de départ/arrivée ne sont jamais déplacés. Les courbes (Bézier) sont donc recalculées (ou transformées) à chaque changement de vue.
-- **Rendu hybride** : SVG jusqu'à environ 2 000 flux, **Canvas au-delà** (bascule automatique). Seuil indicatif à valider par mesure de performance.
-- **Cache des coordonnées projetées** entre les mises à jour ; une simple modification de sélection ne doit pas reconstruire la carte ni recalculer la géométrie.
+- **Géométrie calculée en pixels après projection**, avec décalages latéraux en pixels : la séparation reste constante au zoom, et les points GPS de départ/arrivée ne sont jamais déplacés. Les courbes (Bézier) sont recalculées à chaque changement de vue.
+- **Rendu hybride** : SVG jusqu'à environ 2 000 flux, **Canvas au-delà** (bascule automatique). Seuil indicatif à valider par mesure.
+- **Cache des coordonnées projetées** (`ProjectionCache`, vidé sur `move`/`resize`) ; une simple modification de sélection ne doit pas reconstruire la carte ni recalculer la géométrie.
 - Tangente de la courbe au point d'arrivée pour orienter la pointe.
 - Agrégation par défaut des flux identiques (même départ + arrivée + catégorie) dans `dataAggregator`.
-- `dataReductionAlgorithm` / limite de lignes du SDK à déclarer dans `capabilities.json` (tableau de type `table` ou `categorical` à choisir à l'étape 2/3 ; un mapping `table` est probablement plus adapté à des lignes de flux avec 4 coordonnées — à confirmer).
+- **Mapping de données `table`** (confirmé par l'utilisateur) : une ligne = un flux avec 4 coordonnées ; `dataReductionAlgorithm.window.count = 30000` dans `capabilities.json` (le SDK limite par défaut le nombre de lignes ; à documenter et à tester, voir `fetchMoreData`).
 
 ---
 
-## 6. Décisions en attente de l'utilisateur (valeurs par défaut si pas de réponse)
+## 6. Décisions de l'utilisateur
 
-1. **Fond de carte par défaut** : style vectoriel gratuit **sans clé**, par exemple OpenFreeMap, URL configurable dans le panneau de formatage. **Ses conditions d'utilisation n'ont pas été vérifiées** : les vérifier et les documenter. Les tuiles OSM officielles (`tile.openstreetmap.org`) sont déconseillées pour un usage intensif.
-2. **Informations d'auteur** : nom, email, URL de support, nom d'affichage du visuel (valeurs provisoires actuellement).
-3. **Test sur Power BI Desktop** : l'utilisateur peut-il tester les `.pbiviz` au fil des étapes ? Sans cela, le fond de carte et le worker ne peuvent pas être déclarés opérationnels.
-
-La dernière proposition faite à l'utilisateur : s'il répond simplement « ok », partir sur OpenFreeMap, des valeurs d'auteur provisoires, et enchaîner sur l'étape 2.
+1. **Fond de carte** : **OpenFreeMap confirmé**, style par défaut `https://tiles.openfreemap.org/styles/liberty`, URL configurable dans le panneau de formatage. Conditions vérifiées sur openfreemap.org/tos (consultées le 25/11/2026) : service gratuit, sans clé ni inscription, usage commercial possible, fourni « tel quel » sans garantie, attribution à conserver (MapLibre l'affiche). Le service peut changer ou disparaître : à documenter dans le README. Les tuiles OSM officielles (`tile.openstreetmap.org`) sont déconseillées pour un usage intensif.
+2. **Auteur** : « rien pour le moment » → valeurs provisoires conservées dans `pbiviz.json`. **À redemander avant toute diffusion.**
+3. **Test Power BI Desktop** : l'utilisateur **peut** tester les `.pbiviz` au fil des étapes.
+4. **Compilation** : l'assistant n'a pas de shell ; l'utilisateur lance les commandes (protocole en §8) et renvoie les sorties. Pas de GitHub Action pour l'instant.
+5. **Mapping `table`** : confirmé.
+6. **Workflow Git** : l'utilisateur a demandé de **pousser directement sur `main`** (pas de branche ni de PR pour l'instant), contrairement à la méthode initiale. L'assistant écrit via l'API GitHub avec confirmation avant chaque écriture.
 
 ---
 
 ## 7. Risques et points non vérifiés (à ne jamais présenter comme acquis)
 
+- **Code de l'étape 2 jamais compilé** par l'assistant : API `formattingSettings` (6.0.4), types MapLibre 6.19 (`e.error`, `LngLatBounds`, `fitBounds`), règles ESLint Power BI.
 - **Sandbox Power BI** : acceptation du worker `blob:`, de WebGL, de la politique CSP → **non testé**. Repli prévu : rendu MapLibre sans worker, ou fond de carte en **tuiles raster**.
-- **Accès réseau aux tuiles** : nécessite une déclaration `privileges` / `WebAccess` dans `capabilities.json` avec la **liste exacte des domaines** (style JSON, tuiles, glyphes/polices, sprites). Domaines à lister selon le fournisseur choisi.
+- **Accès réseau aux tuiles** : `WebAccess` déclaré uniquement pour `https://tiles.openfreemap.org`. Si le style charge des sprites, polices ou tuiles depuis d'autres domaines, ils sont bloqués : **domaines réels à relever lors du test Desktop**.
 - **Certification** : un visuel qui fait des appels réseau externes **ne peut pas être certifié** par Microsoft ; les administrateurs de tenant peuvent le bloquer. À documenter dans le README.
-- **Cross-filtering / highlighting** : dépend de la façon dont les lignes de données sont mappées à des `ISelectionId` ; à tester dans Desktop.
+- **Cross-filtering / highlighting** : dépend du mapping des lignes à des `ISelectionId` ; à tester dans Desktop.
 - **Seuil SVG → Canvas** (~2 000 flux) : indicatif, à mesurer.
-- **Limite de lignes** : le SDK limite le nombre de lignes par défaut (fenêtrage, `dataReductionAlgorithm`, `fetchMoreData`) ; à documenter dans les limites techniques.
+- **Limite de lignes** : fenêtrage du SDK (30 000 déclarés, non testé) ; à documenter dans les limites techniques.
+- `package-lock.json` : le champ `name` du lock est encore `visual` ; il sera mis à jour au prochain `npm install` (à committer).
 
 ---
 
-## 8. Commandes utiles
+## 8. Commandes utiles (Windows / PowerShell)
 
-```bash
-# Installation globale de l'outil
-npm install -g powerbi-visuals-tools@7.2.1
-
-# Dans le dossier du projet
-npm install                 # installe les dépendances
-pbiviz package              # compile + lint + produit dist/*.pbiviz
-pbiviz start                # serveur de développement (visuel de dev dans Power BI Service)
-
-# Régénérer le worker embarqué après une mise à jour de maplibre-gl
-node scripts/gen-worker.mjs   # (à créer : voir §4.4, puis l'appeler en pré-build)
+```powershell
+npm install -g powerbi-visuals-tools@7.2.1   # une fois
+cd E:\Git\FreeFlowMap
+git pull
+npm install
+npx tsc --noEmit -p tsconfig.json
+npm run lint
+npm run package      # IMPORTANT : passe par le script npm, donc par "prepackage" (régénère src/workerSource.ts)
+npm run gen-worker   # régénère le worker seul (après mise à jour de maplibre-gl)
 ```
 
-Erreurs déjà rencontrées et leurs causes :
+`pbiviz package` lancé directement **ne déclenche pas** `prepackage` (suffisant tant que `src/workerSource.ts` est à jour). `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` peut être nécessaire si PowerShell bloque npm.
+
+Erreurs déjà rencontrées :
 
 | Erreur | Cause | Correctif |
 |---|---|---|
 | `Author information` / `supportUrl is not specified` | métadonnées manquantes dans `pbiviz.json` | renseigner `author`, `supportUrl` |
 | `TS1192: Module ... has no default export` | MapLibre 6.x | `import * as maplibregl` |
 | `Error parsing bundle asset ... visual.js` | conséquence d'une erreur TypeScript | corriger l'erreur TS d'abord |
+| `'pwsh' n'est pas reconnu` | génération du certificat de dev | ignorable pour `package` |
 
 ---
 
-## 9. À faire à l'étape 2 (proposition)
+## 9. Étape 2 : contenu poussé (commits `fec87e7`, `d7300b3`)
 
-1. Renommer le package (`package.json`), renseigner `pbiviz.json` (displayName, description, auteur).
-2. Créer l'arborescence `src/` du §2.10 (fichiers vides/squelettes documentés) ; recréer `settings.ts`.
-3. Ajouter le script de génération du worker comme pré-build npm.
-4. Implémenter `map/mapManager.ts` : création de la carte, style configurable (URL), zoom initial, redimensionnement (`update()` avec `viewport`), nettoyage (`destroy`/`remove`), `fitBounds` pour le zoom automatique (hook prévu).
-5. Implémenter `map/projection.ts` : `lngLat → pixel` via `map.project()`, avec cache invalidé sur `move`/`zoom`/`resize`.
-6. Déclarer dans `capabilities.json` : rôles de données (§2.1), `privileges` WebAccess (domaines du fournisseur de tuiles), objets de formatage de la section « Carte ».
-7. Fournir un `.pbiviz` de test + un jeu de données de démonstration minimal, et demander à l'utilisateur de tester le chargement de la carte dans Desktop **avant** de passer à l'étape 3.
-8. Mettre à jour ce fichier (`HANDOFF.md`) : état d'avancement, décisions prises, résultats de tests.
+- `.gitignore` ; `webpack.statistics.prod.html` retiré du dépôt.
+- `scripts/gen-worker.mjs` + scripts npm `gen-worker`, `prestart`, `prepackage`.
+- `package.json` : `name` = `flowmap`, description, dépôt ; **aucune version de dépendance modifiée**.
+- `pbiviz.json` : seul `gitHubUrl` modifié.
+- `capabilities.json` : 7 rôles (`latStart`, `lonStart`, `latEnd`, `lonEnd`, `value`, `flowId`, `category`), mapping `table`, `privileges` WebAccess, objet de formatage `map` (`styleUrl`, `initialZoom`, `autoZoom`).
+- `src/settings.ts` : `VisualFormattingSettingsModel` avec la carte « Carte » ; constantes `DEFAULT_STYLE_URL`, `DEFAULT_ZOOM`.
+- `src/map/mapManager.ts` : création de la carte (style par URL, centre par défaut France, zoom), `applySettings`, `resize`, `fitToPoints` (hook du zoom automatique, non appelé avant l'étape 3), `destroy`, callbacks d'erreur/chargement.
+- `src/map/projection.ts` : `ProjectionCache` (`map.project()` + cache vidé sur `move`/`resize`).
+- `src/visual.ts` : worker blob configuré une seule fois, carte + calque SVG D3 superposé (`pointer-events: none`), boîte d'état pour afficher les erreurs de carte, `getFormattingModel`, `destroy`. **Aucun rendu de flux.**
+- `autoZoom` est déclaré mais **pas encore utilisé**.
+- Pas encore fait : jeu de données de démonstration (CSV), README, icône et textes localisés.
 
 ---
 
-## 10. Autres éléments de contexte
+## 10. Tests attendus de l'utilisateur pour l'étape 2 (résultats non encore reçus)
 
-- L'utilisateur est en France (fuseau Europe/Paris) et s'exprime en français.
+Compilation : `git pull`, `npm install`, `npx tsc --noEmit -p tsconfig.json`, `npm run lint`, `npm run package` ; renvoyer les sorties complètes.
+
+Power BI Desktop :
+
+1. Importer `dist/*.pbiviz`.
+2. Ajouter le visuel : la carte de France doit s'afficher (routes, villes, attribution).
+3. Déplacer, zoomer, redimensionner.
+4. Changer « Carte > URL du style » et « Zoom initial » dans le volet Format.
+5. Relever toute erreur (boîte rouge/blanche en haut à gauche, console F12 si disponible) : worker `blob:`, WebGL, domaines bloqués.
+6. Glisser des colonnes dans les 7 champs de données (aucun flux dessiné à ce stade).
+
+---
+
+## 11. Autres éléments de contexte
+
+- L'utilisateur est en France (fuseau Europe/Paris), s'exprime en français, travaille sous Windows (`E:\Git\FreeFlowMap`).
+- L'assistant n'a accès qu'à l'API GitHub (pas de shell) : toute compilation/lint/test passe par l'utilisateur.
