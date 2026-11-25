@@ -1,0 +1,77 @@
+/**
+ * Géométrie des courbes, calculée en pixels après projection.
+ * Les points de départ et d'arrivée sont ceux du GPS projetés : seul le point de contrôle est décalé.
+ * Étape 3 : courbe de Bézier quadratique simple ; la séparation des flux inverses et proches vient à l'étape 4.
+ */
+export interface Point {
+    x: number;
+    y: number;
+}
+
+export interface QuadraticCurve {
+    start: Point;
+    control: Point;
+    end: Point;
+}
+
+export interface Curve extends QuadraticCurve {
+    /** Distance en pixels entre départ et arrivée. */
+    chord: number;
+}
+
+const MAX_OFFSET_PX = 250;
+/** En dessous de cette distance (px), la courbure est réduite progressivement (trajets très courts). */
+const SHORT_CHORD_PX = 60;
+
+/**
+ * @param curvature décalage du point de contrôle en fraction de la corde (ex. 0.2).
+ * Le décalage est à gauche du sens de déplacement : A→B et B→A se courbent donc de côtés opposés.
+ */
+export function computeCurve(start: Point, end: Point, curvature: number): Curve {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const chord = Math.hypot(dx, dy);
+    if (chord < 1e-6) {
+        return { start, control: { x: start.x, y: start.y }, end, chord: 0 };
+    }
+    const shortFactor = Math.min(1, chord / SHORT_CHORD_PX);
+    const offset = Math.min(curvature * chord, MAX_OFFSET_PX) * shortFactor;
+    const nx = -dy / chord;
+    const ny = dx / chord;
+    return {
+        start,
+        control: { x: (start.x + end.x) / 2 + nx * offset, y: (start.y + end.y) / 2 + ny * offset },
+        end,
+        chord
+    };
+}
+
+/** Angle (radians) de la tangente à l'arrivée de la courbe, orientée dans le sens du déplacement. */
+export function endTangentAngle(curve: Curve): number {
+    let dx = curve.end.x - curve.control.x;
+    let dy = curve.end.y - curve.control.y;
+    if (Math.hypot(dx, dy) < 1e-6) {
+        dx = curve.end.x - curve.start.x;
+        dy = curve.end.y - curve.start.y;
+    }
+    return Math.atan2(dy, dx);
+}
+
+function lerp(a: Point, b: Point, t: number): Point {
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+}
+
+/** Première partie [0, t] d'une courbe quadratique (algorithme de De Casteljau). */
+export function splitQuadratic(curve: QuadraticCurve, t: number): QuadraticCurve {
+    const q0 = lerp(curve.start, curve.control, t);
+    const q1 = lerp(curve.control, curve.end, t);
+    return { start: curve.start, control: q0, end: lerp(q0, q1, t) };
+}
+
+function f(n: number): string {
+    return n.toFixed(2);
+}
+
+export function quadraticPath(c: QuadraticCurve): string {
+    return `M${f(c.start.x)},${f(c.start.y)} Q${f(c.control.x)},${f(c.control.y)} ${f(c.end.x)},${f(c.end.y)}`;
+}

@@ -34,6 +34,27 @@
                     "type": { "bool": true }
                 }
             }
+        },
+        "arrows": {
+            "displayName": "Flèches",
+            "properties": {
+                "color": {
+                    "displayName": "Couleur",
+                    "type": { "fill": { "solid": { "color": true } } }
+                },
+                "opacity": {
+                    "displayName": "Opacité (%)",
+                    "type": { "numeric": true }
+                },
+                "curvature": {
+                    "displayName": "Courbure (%)",
+                    "type": { "numeric": true }
+                },
+                "maxFlows": {
+                    "displayName": "Nombre maximal de flux",
+                    "type": { "numeric": true }
+                }
+            }
         }
     },
     "dataViewMappings": [

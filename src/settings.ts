@@ -1,5 +1,5 @@
 /**
- * Modèle du panneau de formatage (section « Carte » pour l'étape 2).
+ * Modèle du panneau de formatage : sections « Carte » et « Flèches ».
  * Les noms (name) doivent correspondre à ceux de capabilities.json.
  */
 import { formattingSettings } from "powerbi-visuals-utils-formattingmodel";
@@ -7,6 +7,7 @@ import { formattingSettings } from "powerbi-visuals-utils-formattingmodel";
 /** Style vectoriel gratuit sans clé API (OpenFreeMap). */
 export const DEFAULT_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
 export const DEFAULT_ZOOM = 5;
+export const DEFAULT_ARROW_COLOR = "#1F77B4";
 
 class MapCardSettings extends formattingSettings.SimpleCard {
     public styleUrl = new formattingSettings.TextInput({
@@ -33,7 +34,40 @@ class MapCardSettings extends formattingSettings.SimpleCard {
     public slices: Array<formattingSettings.Slice> = [this.styleUrl, this.initialZoom, this.autoZoom];
 }
 
+class ArrowsCardSettings extends formattingSettings.SimpleCard {
+    public color = new formattingSettings.ColorPicker({
+        name: "color",
+        displayName: "Couleur",
+        value: { value: DEFAULT_ARROW_COLOR }
+    });
+
+    /** En pourcentage (0 à 100). */
+    public opacity = new formattingSettings.NumUpDown({
+        name: "opacity",
+        displayName: "Opacité (%)",
+        value: 70
+    });
+
+    /** En pourcentage de la distance départ-arrivée (0 à 60). */
+    public curvature = new formattingSettings.NumUpDown({
+        name: "curvature",
+        displayName: "Courbure (%)",
+        value: 20
+    });
+
+    public maxFlows = new formattingSettings.NumUpDown({
+        name: "maxFlows",
+        displayName: "Nombre maximal de flux",
+        value: 5000
+    });
+
+    public name: string = "arrows";
+    public displayName: string = "Flèches";
+    public slices: Array<formattingSettings.Slice> = [this.color, this.opacity, this.curvature, this.maxFlows];
+}
+
 export class VisualFormattingSettingsModel extends formattingSettings.Model {
     public map = new MapCardSettings();
-    public cards = [this.map];
+    public arrows = new ArrowsCardSettings();
+    public cards = [this.map, this.arrows];
 }
