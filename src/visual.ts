@@ -3,13 +3,14 @@ import * as d3 from "d3";
 import * as maplibregl from "maplibre-gl";
 import { FormattingSettingsService } from "powerbi-visuals-utils-formattingmodel";
 import { WORKER_SOURCE } from "./workerSource";
-import { VisualFormattingSettingsModel } from "./settings";
+import { VisualFormattingSettingsModel, readScaleMode } from "./settings";
 import { MapManager } from "./map/mapManager";
 import { ProjectionCache } from "./map/projection";
 import { parseFlows } from "./data/dataParser";
 import { aggregateFlows } from "./data/dataAggregator";
 import { Flow } from "./data/types";
 import { FlowRenderer, RenderOptions } from "./flows/flowRenderer";
+import { createValueFormatter } from "./flows/labelFormatter";
 import "../style/visual.less";
 
 import IVisual = powerbi.extensibility.visual.IVisual;
@@ -18,8 +19,6 @@ import VisualUpdateOptions = powerbi.extensibility.visual.VisualUpdateOptions;
 
 let workerConfigured = false;
 
-/** Épaisseur provisoire des traits (px), remplacée par l'échelle normalisée à l'étape 5. */
-const PROVISIONAL_THICKNESS = 3;
 const MAX_ROWS = 30000;
 
 /** Le worker MapLibre est embarqué dans le bundle et servi via une URL blob: (un visuel = un seul fichier). */
@@ -55,6 +54,7 @@ function errorMessage(e: unknown): string {
 export class Visual implements IVisual {
     private readonly formattingSettingsService: FormattingSettingsService;
     private formattingSettings: VisualFormattingSettingsModel;
+    private readonly formatValue: (value: number) => string;
     private readonly mapContainer: HTMLDivElement;
     private readonly statusBox: HTMLDivElement;
     private readonly infoBox: HTMLDivElement;
@@ -85,6 +85,7 @@ export class Visual implements IVisual {
         configureWorker();
         this.formattingSettingsService = new FormattingSettingsService();
         this.formattingSettings = new VisualFormattingSettingsModel();
+        this.formatValue = createValueFormatter(options.host.locale);
 
         const root = document.createElement("div");
         root.style.position = "relative";
@@ -210,15 +211,22 @@ export class Visual implements IVisual {
 
     private computeRenderOptions(): RenderOptions {
         const a = this.formattingSettings.arrows;
+        const l = this.formattingSettings.labels;
         return {
             color: a.color.value.value,
             opacity: clamp(a.opacity.value, 0, 100) / 100,
             curvature: clamp(a.curvature.value, 0, 60) / 100,
-            thickness: PROVISIONAL_THICKNESS
+            minThickness: clamp(a.minThickness.value, 0.5, 40),
+            maxThickness: clamp(a.maxThickness.value, 0.5, 60),
+            scaleMode: readScaleMode(a.scale.value),
+            showLabels: l.show.value,
+            labelFontSize: clamp(l.fontSize.value, 6, 32),
+            labelMinLength: clamp(l.minLength.value, 0, 1000),
+            formatValue: this.formatValue
         };
     }
 
-    /** DIAGNOSTIC TEMPORAIRE : à retirer ou masquer une fois le rendu validé. */
+    /** Avertissements de données toujours visibles ; ligne de diagnostic détaillée seulement si l'option est activée. */
     private updateInfo(
         linesRead: number,
         skipped: number,
@@ -228,11 +236,13 @@ export class Visual implements IVisual {
         width: number,
         height: number
     ): void {
-        const zoom = this.mapManager.getMap().getZoom().toFixed(1);
-        const opts = this.renderOptions;
-        const parts: string[] = [
-            `${linesRead} ligne(s) lue(s), ${flowCount} flux, ${drawn} tracé(s) | zoom ${zoom} | ${Math.round(width)}x${Math.round(height)} px | ${opts.color} opacité ${opts.opacity}`
-        ];
+        const parts: string[] = [];
+        if (this.formattingSettings.debug.showDiagnostics.value) {
+            const zoom = this.mapManager.getMap().getZoom().toFixed(1);
+            parts.push(
+                `${linesRead} ligne(s) lue(s), ${flowCount} flux, ${drawn} tracé(s) | zoom ${zoom} | ${Math.round(width)}x${Math.round(height)} px`
+            );
+        }
         if (skipped > 0) {
             parts.push(`${skipped} ligne(s) ignorée(s) : coordonnées invalides`);
         }
@@ -240,7 +250,7 @@ export class Visual implements IVisual {
             parts.push(`${truncated} flux non affiché(s) : limite atteinte`);
         }
         this.infoBox.textContent = parts.join(" — ");
-        this.infoBox.style.display = "block";
+        this.infoBox.style.display = parts.length > 0 ? "block" : "none";
     }
 
     private showStatus(message: string): void {

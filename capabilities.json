@@ -50,9 +50,53 @@
                     "displayName": "Courbure (%)",
                     "type": { "numeric": true }
                 },
+                "minThickness": {
+                    "displayName": "Épaisseur minimale (px)",
+                    "type": { "numeric": true }
+                },
+                "maxThickness": {
+                    "displayName": "Épaisseur maximale (px)",
+                    "type": { "numeric": true }
+                },
+                "scale": {
+                    "displayName": "Échelle d'épaisseur",
+                    "type": {
+                        "enumeration": [
+                            { "value": "sqrt", "displayName": "Racine carrée" },
+                            { "value": "linear", "displayName": "Linéaire" },
+                            { "value": "log", "displayName": "Logarithmique" }
+                        ]
+                    }
+                },
                 "maxFlows": {
                     "displayName": "Nombre maximal de flux",
                     "type": { "numeric": true }
+                }
+            }
+        },
+        "labels": {
+            "displayName": "Étiquettes",
+            "properties": {
+                "show": {
+                    "displayName": "Afficher les valeurs",
+                    "type": { "bool": true }
+                },
+                "fontSize": {
+                    "displayName": "Taille du texte (px)",
+                    "type": { "numeric": true }
+                },
+                "minLength": {
+                    "displayName": "Longueur minimale du flux (px)",
+                    "type": { "numeric": true }
+                }
+            }
+        },
+        "debug": {
+            "displayName": "Diagnostic",
+            "properties": {
+                "showDiagnostics": {
+                    "displayName": "Afficher le diagnostic",
+                    "type": { "bool": true }
                 }
             }
         }
