@@ -48,6 +48,10 @@ function computeSignature(flows: Flow[]): string {
     return `${flows.length}:${h}`;
 }
 
+function errorMessage(e: unknown): string {
+    return e instanceof Error ? e.message : String(e);
+}
+
 export class Visual implements IVisual {
     private readonly formattingSettingsService: FormattingSettingsService;
     private formattingSettings: VisualFormattingSettingsModel;
@@ -69,7 +73,11 @@ export class Visual implements IVisual {
         this.rafPending = true;
         requestAnimationFrame(() => {
             this.rafPending = false;
-            this.flowRenderer.render(this.renderOptions);
+            try {
+                this.flowRenderer.render(this.renderOptions);
+            } catch (e) {
+                this.showStatus(`Rendu des flux : ${errorMessage(e)}`);
+            }
         });
     };
 
@@ -87,6 +95,7 @@ export class Visual implements IVisual {
         this.mapContainer = document.createElement("div");
         this.mapContainer.style.position = "absolute";
         this.mapContainer.style.inset = "0";
+        this.mapContainer.style.zIndex = "0";
         root.appendChild(this.mapContainer);
 
         this.svg = d3.select(root).append("svg");
@@ -94,12 +103,15 @@ export class Visual implements IVisual {
             .style("position", "absolute")
             .style("left", "0")
             .style("top", "0")
+            .style("z-index", "1")
+            .style("overflow", "visible")
             .style("pointer-events", "none");
 
         this.statusBox = document.createElement("div");
         this.statusBox.style.position = "absolute";
         this.statusBox.style.left = "8px";
         this.statusBox.style.top = "8px";
+        this.statusBox.style.zIndex = "3";
         this.statusBox.style.padding = "4px 8px";
         this.statusBox.style.background = "rgba(255,255,255,0.9)";
         this.statusBox.style.font = "12px sans-serif";
@@ -110,6 +122,7 @@ export class Visual implements IVisual {
         this.infoBox.style.position = "absolute";
         this.infoBox.style.left = "8px";
         this.infoBox.style.bottom = "8px";
+        this.infoBox.style.zIndex = "3";
         this.infoBox.style.padding = "2px 6px";
         this.infoBox.style.background = "rgba(255,255,255,0.85)";
         this.infoBox.style.font = "11px sans-serif";
@@ -139,31 +152,48 @@ export class Visual implements IVisual {
             options.dataViews?.[0]
         );
         const m = this.formattingSettings.map;
-        this.mapManager.applySettings({ styleUrl: m.styleUrl.value, initialZoom: m.initialZoom.value });
-
         const { width, height } = options.viewport;
         this.svg.attr("width", width).attr("height", height);
-        this.mapManager.resize();
 
-        const parsed = parseFlows(options.dataViews?.[0]);
-        const maxFlows = clamp(Math.round(this.formattingSettings.arrows.maxFlows.value), 1, MAX_ROWS);
-        const result = aggregateFlows(parsed.rows, maxFlows);
-        this.flowRenderer.setFlows(result.flows);
-        this.renderOptions = this.computeRenderOptions();
-        this.updateInfo(parsed.skipped, result.truncated);
+        let linesRead = 0;
+        let skipped = 0;
+        let truncated = 0;
+        let flowCount = 0;
+        let drawn = 0;
+        try {
+            this.mapManager.applySettings({ styleUrl: m.styleUrl.value, initialZoom: m.initialZoom.value });
+            this.mapManager.resize();
 
-        // Recadrage automatique uniquement quand les flux affichés changent (données ou filtres).
-        const signature = computeSignature(result.flows);
-        if (m.autoZoom.value && result.flows.length > 0 && signature !== this.lastSignature) {
-            const points: Array<[number, number]> = [];
-            for (const f of result.flows) {
-                points.push([f.startLng, f.startLat], [f.endLng, f.endLat]);
+            const parsed = parseFlows(options.dataViews?.[0]);
+            linesRead = parsed.rows.length;
+            skipped = parsed.skipped;
+            const maxFlows = clamp(Math.round(this.formattingSettings.arrows.maxFlows.value), 1, MAX_ROWS);
+            const result = aggregateFlows(parsed.rows, maxFlows);
+            truncated = result.truncated;
+            flowCount = result.flows.length;
+            this.flowRenderer.setFlows(result.flows);
+            this.renderOptions = this.computeRenderOptions();
+
+            // Recadrage automatique uniquement quand les flux affichés changent (données ou filtres).
+            const signature = computeSignature(result.flows);
+            if (m.autoZoom.value && result.flows.length > 0 && signature !== this.lastSignature) {
+                try {
+                    const points: Array<[number, number]> = [];
+                    for (const f of result.flows) {
+                        points.push([f.startLng, f.startLat], [f.endLng, f.endLat]);
+                    }
+                    this.mapManager.fitToPoints(points);
+                } catch (e) {
+                    this.showStatus(`Recadrage de la carte : ${errorMessage(e)}`);
+                }
             }
-            this.mapManager.fitToPoints(points);
-        }
-        this.lastSignature = signature;
+            this.lastSignature = signature;
 
-        this.flowRenderer.render(this.renderOptions);
+            drawn = this.flowRenderer.render(this.renderOptions);
+        } catch (e) {
+            this.showStatus(`Flux : ${errorMessage(e)}`);
+        }
+        this.updateInfo(linesRead, skipped, truncated, flowCount, drawn, width, height);
     }
 
     public getFormattingModel(): powerbi.visuals.FormattingModel {
@@ -188,8 +218,21 @@ export class Visual implements IVisual {
         };
     }
 
-    private updateInfo(skipped: number, truncated: number): void {
-        const parts: string[] = [];
+    /** DIAGNOSTIC TEMPORAIRE : à retirer ou masquer une fois le rendu validé. */
+    private updateInfo(
+        linesRead: number,
+        skipped: number,
+        truncated: number,
+        flowCount: number,
+        drawn: number,
+        width: number,
+        height: number
+    ): void {
+        const zoom = this.mapManager.getMap().getZoom().toFixed(1);
+        const opts = this.renderOptions;
+        const parts: string[] = [
+            `${linesRead} ligne(s) lue(s), ${flowCount} flux, ${drawn} tracé(s) | zoom ${zoom} | ${Math.round(width)}x${Math.round(height)} px | ${opts.color} opacité ${opts.opacity}`
+        ];
         if (skipped > 0) {
             parts.push(`${skipped} ligne(s) ignorée(s) : coordonnées invalides`);
         }
@@ -197,7 +240,7 @@ export class Visual implements IVisual {
             parts.push(`${truncated} flux non affiché(s) : limite atteinte`);
         }
         this.infoBox.textContent = parts.join(" — ");
-        this.infoBox.style.display = parts.length > 0 ? "block" : "none";
+        this.infoBox.style.display = "block";
     }
 
     private showStatus(message: string): void {

@@ -39,7 +39,8 @@ export class FlowRenderer {
         this.flows = flows;
     }
 
-    public render(options: RenderOptions): void {
+    /** Dessine les flux et retourne le nombre de tracés effectivement produits. */
+    public render(options: RenderOptions): number {
         const items: RenderedFlow[] = [];
         const size = arrowSize(options.thickness);
 
@@ -78,5 +79,6 @@ export class FlowRenderer {
         all.select<SVGPolygonElement>("polygon.head")
             .attr("points", (d) => d.head)
             .attr("fill", options.color);
+        return items.length;
     }
 }
