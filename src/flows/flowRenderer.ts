@@ -3,14 +3,16 @@
  * au-dessus de la carte. La géométrie est recalculée en pixels à chaque rendu à partir du cache de projection.
  * L'épaisseur de chaque flèche est calculée relativement aux autres flux affichés (voir thicknessScale.ts).
  * La pointe s'arrête avant la coordonnée d'arrivée, avec un écart dynamique (voir endpointSpacing.ts).
+ * Les flux dont départ et arrivée sont identiques sont dessinés en boucle (voir loopCalculator.ts).
  * Le calque ne capture aucun événement de souris : la détection d'une flèche passe par hitTest().
  */
 import * as d3 from "d3";
 import { Flow } from "../data/types";
 import { ProjectionCache } from "../map/projection";
-import { distanceToQuadratic } from "../interactions/hitTest";
+import { distanceToPolyline, distanceToQuadratic } from "../interactions/hitTest";
 import {
     Curve,
+    Point,
     QuadraticCurve,
     arrivalDirection,
     computeCurve,
@@ -22,12 +24,22 @@ import {
 } from "./curveCalculator";
 import { arrowHeadPoints, arrowSize, ArrowSize } from "./arrowRenderer";
 import { computeEndGaps } from "./endpointSpacing";
+import {
+    LOOP_NEIGHBOUR_RADIUS_PX,
+    PortIndex,
+    chooseLoopDirection,
+    computeLoop,
+    isLoopFlow,
+    loopSize
+} from "./loopCalculator";
 import { computeThicknesses, ScaleMode } from "./thicknessScale";
 
 /** Écart maximal (px) entre la pointe et la coordonnée, quelle que soit la densité d'arrivées. */
 const MAX_END_GAP_PX = 48;
 /** Rayon (px) dans lequel des arrivées sont considérées comme « au même endroit ». */
 const CLUSTER_RADIUS_PX = 14;
+/** Écart minimal (px) entre la pointe d'une boucle et son point GPS. */
+const MIN_LOOP_GAP_PX = 4;
 
 export interface RenderOptions {
     color: string;
@@ -65,8 +77,11 @@ interface RenderedFlow {
 
 interface HitItem {
     key: string;
-    curve: QuadraticCurve;
     tolerance: number;
+    /** Courbe quadratique (flèches normales). */
+    curve?: QuadraticCurve;
+    /** Ligne brisée (boucles). */
+    polyline?: Point[];
 }
 
 interface PreparedFlow {
@@ -74,6 +89,24 @@ interface PreparedFlow {
     thickness: number;
     size: ArrowSize;
     curve: Curve;
+}
+
+interface PreparedLoop {
+    flow: Flow;
+    thickness: number;
+    size: ArrowSize;
+    origin: Point;
+}
+
+/** Direction (radians) dans laquelle la courbe quitte son point de départ. */
+function departureDirection(curve: Curve): number {
+    let dx = curve.control.x - curve.start.x;
+    let dy = curve.control.y - curve.start.y;
+    if (Math.hypot(dx, dy) < 1e-6) {
+        dx = curve.end.x - curve.start.x;
+        dy = curve.end.y - curve.start.y;
+    }
+    return Math.atan2(dy, dx);
 }
 
 export class FlowRenderer {
@@ -100,7 +133,12 @@ export class FlowRenderer {
         let best: string | null = null;
         let bestDistance = Infinity;
         for (const item of this.hitItems) {
-            const d = distanceToQuadratic(item.curve, x, y);
+            let d = Infinity;
+            if (item.curve) {
+                d = distanceToQuadratic(item.curve, x, y);
+            } else if (item.polyline) {
+                d = distanceToPolyline(item.polyline, x, y);
+            }
             if (d <= item.tolerance && d <= bestDistance) {
                 best = item.key;
                 bestDistance = d;
@@ -116,11 +154,16 @@ export class FlowRenderer {
             { min: options.minThickness, max: options.maxThickness, mode: options.scaleMode }
         );
 
-        // Passe 1 : projection et courbe d'origine de chaque flux.
+        // Passe 1 : projection ; séparation des flèches normales et des boucles.
         const prepared: PreparedFlow[] = [];
+        const loops: PreparedLoop[] = [];
         this.flows.forEach((flow, i) => {
             const thickness = thicknesses[i];
             const start = this.projection.project(flow.startLng, flow.startLat);
+            if (isLoopFlow(flow.startLat, flow.startLng, flow.endLat, flow.endLng)) {
+                loops.push({ flow, thickness, size: arrowSize(thickness), origin: start });
+                return;
+            }
             const end = this.projection.project(flow.endLng, flow.endLat);
             const curve = computeCurve(start, end, options.curvature);
             if (curve.chord < 1) {
@@ -145,7 +188,7 @@ export class FlowRenderer {
             }
         );
 
-        // Passe 2 : courbe raccourcie, pointe et étiquette.
+        // Passe 2 : courbe raccourcie, pointe et étiquette des flèches normales.
         const items: RenderedFlow[] = [];
         const hits: HitItem[] = [];
         prepared.forEach((p, i) => {
@@ -187,6 +230,52 @@ export class FlowRenderer {
             });
             hits.push({ key: p.flow.key, curve: tipCurve, tolerance: Math.max(p.thickness / 2, 4) + 4 });
         });
+
+        // Boucles : orientées vers le plus grand secteur libre autour de leur point.
+        if (loops.length > 0) {
+            const ports = new PortIndex();
+            for (const p of prepared) {
+                ports.add({ x: p.curve.start.x, y: p.curve.start.y, angle: departureDirection(p.curve) });
+                ports.add({ x: p.curve.end.x, y: p.curve.end.y, angle: arrivalDirection(p.curve) });
+            }
+            for (const loop of loops) {
+                const neighbours = ports.anglesNear(loop.origin.x, loop.origin.y, LOOP_NEIGHBOUR_RADIUS_PX);
+                const direction = chooseLoopDirection(neighbours);
+                // Les boucles suivantes au même endroit éviteront celle-ci.
+                ports.add({ x: loop.origin.x, y: loop.origin.y, angle: direction });
+
+                const size = loopSize(loop.thickness);
+                const headLength = Math.min(loop.size.length, size * 0.45);
+                const halfWidth = loop.size.halfWidth * (headLength / loop.size.length);
+                const gap = Math.max(options.endGap, MIN_LOOP_GAP_PX);
+                const geometry = computeLoop(loop.origin, direction, size, gap, headLength);
+
+                let label: string | null = null;
+                let labelX = 0;
+                let labelY = 0;
+                if (options.showLabels) {
+                    const offset = loop.thickness / 2 + options.labelFontSize * 0.8;
+                    label = options.formatValue(loop.flow.value);
+                    labelX = geometry.apex.x + Math.cos(direction) * offset;
+                    labelY = geometry.apex.y + Math.sin(direction) * offset;
+                }
+
+                items.push({
+                    key: loop.flow.key,
+                    shaft: geometry.shaft,
+                    head: arrowHeadPoints(geometry.tip, geometry.angle, headLength, halfWidth),
+                    thickness: loop.thickness,
+                    label,
+                    labelX,
+                    labelY
+                });
+                hits.push({
+                    key: loop.flow.key,
+                    polyline: geometry.polyline,
+                    tolerance: Math.max(loop.thickness / 2, 4) + 4
+                });
+            }
+        }
         this.hitItems = hits;
 
         const hasSelection = options.selectedKeys.size > 0;

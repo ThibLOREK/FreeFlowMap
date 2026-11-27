@@ -1,9 +1,9 @@
 /**
- * Détection de la flèche sous le pointeur : distance en pixels entre un point et une courbe quadratique,
+ * Détection de la flèche sous le pointeur : distance en pixels entre un point et une courbe,
  * calculée sur une approximation par segments. Permet de garder la carte entièrement déplaçable et zoomable
  * (le calque SVG ne capture aucun événement de souris).
  */
-import { QuadraticCurve, quadraticPointAt } from "../flows/curveCalculator";
+import { Point, QuadraticCurve, quadraticPointAt } from "../flows/curveCalculator";
 
 function distanceToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
     const dx = bx - ax;
@@ -26,6 +26,18 @@ export function distanceToQuadratic(curve: QuadraticCurve, x: number, y: number,
             best = d;
         }
         previous = current;
+    }
+    return best;
+}
+
+/** Distance entre un point et une ligne brisée (utilisée pour les boucles). */
+export function distanceToPolyline(points: Point[], x: number, y: number): number {
+    let best = Infinity;
+    for (let i = 1; i < points.length; i++) {
+        const d = distanceToSegment(x, y, points[i - 1].x, points[i - 1].y, points[i].x, points[i].y);
+        if (d < best) {
+            best = d;
+        }
     }
     return best;
 }
