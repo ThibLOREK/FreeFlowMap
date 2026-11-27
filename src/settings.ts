@@ -78,6 +78,19 @@ class ArrowsCardSettings extends formattingSettings.SimpleCard {
         value: 20
     });
 
+    /** Écart de base (px) entre la pointe et la coordonnée d'arrivée. */
+    public endGap = new formattingSettings.NumUpDown({
+        name: "endGap",
+        displayName: "Distance à la coordonnée (px)",
+        value: 6
+    });
+
+    public dynamicGap = new formattingSettings.ToggleSwitch({
+        name: "dynamicGap",
+        displayName: "Écart dynamique (arrivées groupées)",
+        value: true
+    });
+
     public minThickness = new formattingSettings.NumUpDown({
         name: "minThickness",
         displayName: "Épaisseur minimale (px)",
@@ -110,6 +123,8 @@ class ArrowsCardSettings extends formattingSettings.SimpleCard {
         this.opacity,
         this.dimOpacity,
         this.curvature,
+        this.endGap,
+        this.dynamicGap,
         this.minThickness,
         this.maxThickness,
         this.scale,

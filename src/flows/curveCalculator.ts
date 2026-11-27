@@ -57,6 +57,17 @@ export function endTangentAngle(curve: Curve): number {
     return Math.atan2(dy, dx);
 }
 
+/** Direction (radians) du point d'arrivée vers l'endroit d'où vient la courbe. */
+export function arrivalDirection(curve: QuadraticCurve): number {
+    let dx = curve.control.x - curve.end.x;
+    let dy = curve.control.y - curve.end.y;
+    if (Math.hypot(dx, dy) < 1e-6) {
+        dx = curve.start.x - curve.end.x;
+        dy = curve.start.y - curve.end.y;
+    }
+    return Math.atan2(dy, dx);
+}
+
 function lerp(a: Point, b: Point, t: number): Point {
     return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
 }
@@ -68,6 +79,28 @@ export function quadraticPointAt(curve: QuadraticCurve, t: number): Point {
         x: u * u * curve.start.x + 2 * u * t * curve.control.x + t * t * curve.end.x,
         y: u * u * curve.start.y + 2 * u * t * curve.control.y + t * t * curve.end.y
     };
+}
+
+/**
+ * Paramètre t où la courbe se trouve à `distance` pixels (en ligne droite) de son point d'arrivée.
+ * Recherche par dichotomie : la distance à l'arrivée décroit de la corde à 0 le long de la courbe.
+ */
+export function parameterAtDistanceFromEnd(curve: QuadraticCurve, distance: number): number {
+    if (distance <= 0) {
+        return 1;
+    }
+    let lo = 0;
+    let hi = 1;
+    for (let i = 0; i < 24; i++) {
+        const mid = (lo + hi) / 2;
+        const p = quadraticPointAt(curve, mid);
+        if (Math.hypot(p.x - curve.end.x, p.y - curve.end.y) > distance) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    return (lo + hi) / 2;
 }
 
 /** Première partie [0, t] d'une courbe quadratique (algorithme de De Casteljau). */

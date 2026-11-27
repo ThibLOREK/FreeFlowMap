@@ -2,6 +2,7 @@
  * Rendu SVG (D3) des flux : un tracé et une pointe par flux, puis les étiquettes de valeur, dans un calque
  * au-dessus de la carte. La géométrie est recalculée en pixels à chaque rendu à partir du cache de projection.
  * L'épaisseur de chaque flèche est calculée relativement aux autres flux affichés (voir thicknessScale.ts).
+ * La pointe s'arrête avant la coordonnée d'arrivée, avec un écart dynamique (voir endpointSpacing.ts).
  * Le calque ne capture aucun événement de souris : la détection d'une flèche passe par hitTest().
  */
 import * as d3 from "d3";
@@ -9,15 +10,24 @@ import { Flow } from "../data/types";
 import { ProjectionCache } from "../map/projection";
 import { distanceToQuadratic } from "../interactions/hitTest";
 import {
+    Curve,
     QuadraticCurve,
+    arrivalDirection,
     computeCurve,
     endTangentAngle,
+    parameterAtDistanceFromEnd,
     quadraticPath,
     quadraticPointAt,
     splitQuadratic
 } from "./curveCalculator";
-import { arrowHeadPoints, arrowSize } from "./arrowRenderer";
+import { arrowHeadPoints, arrowSize, ArrowSize } from "./arrowRenderer";
+import { computeEndGaps } from "./endpointSpacing";
 import { computeThicknesses, ScaleMode } from "./thicknessScale";
+
+/** Écart maximal (px) entre la pointe et la coordonnée, quelle que soit la densité d'arrivées. */
+const MAX_END_GAP_PX = 48;
+/** Rayon (px) dans lequel des arrivées sont considérées comme « au même endroit ». */
+const CLUSTER_RADIUS_PX = 14;
 
 export interface RenderOptions {
     color: string;
@@ -25,6 +35,10 @@ export interface RenderOptions {
     opacity: number;
     /** Courbure en fraction de la corde. */
     curvature: number;
+    /** Écart de base (px) entre la pointe et la coordonnée d'arrivée. */
+    endGap: number;
+    /** Adapte l'écart à la densité d'arrivées (et donc au zoom). */
+    dynamicGap: boolean;
     minThickness: number;
     maxThickness: number;
     scaleMode: ScaleMode;
@@ -53,6 +67,13 @@ interface HitItem {
     key: string;
     curve: QuadraticCurve;
     tolerance: number;
+}
+
+interface PreparedFlow {
+    flow: Flow;
+    thickness: number;
+    size: ArrowSize;
+    curve: Curve;
 }
 
 export class FlowRenderer {
@@ -94,48 +115,77 @@ export class FlowRenderer {
             this.flows.map((f) => f.value),
             { min: options.minThickness, max: options.maxThickness, mode: options.scaleMode }
         );
-        const items: RenderedFlow[] = [];
-        const hits: HitItem[] = [];
 
+        // Passe 1 : projection et courbe d'origine de chaque flux.
+        const prepared: PreparedFlow[] = [];
         this.flows.forEach((flow, i) => {
             const thickness = thicknesses[i];
-            const size = arrowSize(thickness);
             const start = this.projection.project(flow.startLng, flow.startLat);
             const end = this.projection.project(flow.endLng, flow.endLat);
             const curve = computeCurve(start, end, options.curvature);
             if (curve.chord < 1) {
                 return;
             }
-            // La pointe ne dépasse jamais 60 % de la longueur du trajet.
-            const length = Math.min(size.length, curve.chord * 0.6);
-            const halfWidth = size.halfWidth * (length / size.length);
-            const angle = endTangentAngle(curve);
-            const shaft = splitQuadratic(curve, 1 - length / curve.chord);
+            prepared.push({ flow, thickness, size: arrowSize(thickness), curve });
+        });
+
+        // Écart entre pointe et coordonnée, selon la densité d'arrivées au zoom courant.
+        const gaps = computeEndGaps(
+            prepared.map((p) => ({
+                end: p.curve.end,
+                approachAngle: arrivalDirection(p.curve),
+                headWidth: p.size.halfWidth * 2,
+                chord: p.curve.chord
+            })),
+            {
+                baseGap: options.endGap,
+                dynamic: options.dynamicGap,
+                maxGap: MAX_END_GAP_PX,
+                clusterRadius: CLUSTER_RADIUS_PX
+            }
+        );
+
+        // Passe 2 : courbe raccourcie, pointe et étiquette.
+        const items: RenderedFlow[] = [];
+        const hits: HitItem[] = [];
+        prepared.forEach((p, i) => {
+            const gap = gaps[i];
+            const tip = gap > 0.5 ? splitQuadratic(p.curve, parameterAtDistanceFromEnd(p.curve, gap)) : p.curve;
+            const tipChord = Math.hypot(tip.end.x - tip.start.x, tip.end.y - tip.start.y);
+            if (tipChord < 2) {
+                return;
+            }
+            const tipCurve: Curve = { start: tip.start, control: tip.control, end: tip.end, chord: tipChord };
+            // La pointe ne dépasse jamais 60 % de la longueur visible du trajet.
+            const length = Math.min(p.size.length, tipChord * 0.6);
+            const halfWidth = p.size.halfWidth * (length / p.size.length);
+            const angle = endTangentAngle(tipCurve);
+            const shaft = splitQuadratic(tipCurve, 1 - length / tipChord);
 
             let label: string | null = null;
             let labelX = 0;
             let labelY = 0;
-            if (options.showLabels && curve.chord >= options.labelMinLength) {
+            if (options.showLabels && tipChord >= options.labelMinLength) {
                 // Milieu de la courbe, décalé du côté du bombement : les flux inverses ont leurs étiquettes de côtés opposés.
-                const mid = quadraticPointAt(curve, 0.5);
-                const nx = -(end.y - start.y) / curve.chord;
-                const ny = (end.x - start.x) / curve.chord;
-                const offset = thickness / 2 + options.labelFontSize * 0.8;
-                label = options.formatValue(flow.value);
+                const mid = quadraticPointAt(tipCurve, 0.5);
+                const nx = -(tipCurve.end.y - tipCurve.start.y) / tipChord;
+                const ny = (tipCurve.end.x - tipCurve.start.x) / tipChord;
+                const offset = p.thickness / 2 + options.labelFontSize * 0.8;
+                label = options.formatValue(p.flow.value);
                 labelX = mid.x + nx * offset;
                 labelY = mid.y + ny * offset;
             }
 
             items.push({
-                key: flow.key,
+                key: p.flow.key,
                 shaft: quadraticPath(shaft),
-                head: arrowHeadPoints(curve.end, angle, length, halfWidth),
-                thickness,
+                head: arrowHeadPoints(tipCurve.end, angle, length, halfWidth),
+                thickness: p.thickness,
                 label,
                 labelX,
                 labelY
             });
-            hits.push({ key: flow.key, curve, tolerance: Math.max(thickness / 2, 4) + 4 });
+            hits.push({ key: p.flow.key, curve: tipCurve, tolerance: Math.max(p.thickness / 2, 4) + 4 });
         });
         this.hitItems = hits;
 

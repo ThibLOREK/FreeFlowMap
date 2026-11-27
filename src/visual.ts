@@ -269,6 +269,8 @@ export class Visual implements IVisual {
             color: a.color.value.value,
             opacity: clamp(a.opacity.value, 0, 100) / 100,
             curvature: clamp(a.curvature.value, 0, 60) / 100,
+            endGap: clamp(a.endGap.value, 0, 60),
+            dynamicGap: a.dynamicGap.value,
             minThickness: clamp(a.minThickness.value, 0.5, 40),
             maxThickness: clamp(a.maxThickness.value, 0.5, 60),
             scaleMode: readScaleMode(a.scale.value),

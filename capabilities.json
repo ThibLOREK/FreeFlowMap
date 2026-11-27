@@ -54,6 +54,14 @@
                     "displayName": "Courbure (%)",
                     "type": { "numeric": true }
                 },
+                "endGap": {
+                    "displayName": "Distance à la coordonnée (px)",
+                    "type": { "numeric": true }
+                },
+                "dynamicGap": {
+                    "displayName": "Écart dynamique (arrivées groupées)",
+                    "type": { "bool": true }
+                },
                 "minThickness": {
                     "displayName": "Épaisseur minimale (px)",
                     "type": { "numeric": true }
