@@ -46,6 +46,10 @@
                     "displayName": "Opacité (%)",
                     "type": { "numeric": true }
                 },
+                "dimOpacity": {
+                    "displayName": "Opacité des flux non sélectionnés (%)",
+                    "type": { "numeric": true }
+                },
                 "curvature": {
                     "displayName": "Courbure (%)",
                     "type": { "numeric": true }

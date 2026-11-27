@@ -11,6 +11,7 @@ import { aggregateFlows } from "./data/dataAggregator";
 import { Flow } from "./data/types";
 import { FlowRenderer, RenderOptions } from "./flows/flowRenderer";
 import { createValueFormatter } from "./flows/labelFormatter";
+import { FlowSelection } from "./interactions/selectionManager";
 import "../style/visual.less";
 
 import IVisual = powerbi.extensibility.visual.IVisual;
@@ -62,9 +63,12 @@ export class Visual implements IVisual {
     private readonly mapManager: MapManager;
     private readonly projection: ProjectionCache;
     private readonly flowRenderer: FlowRenderer;
+    private readonly selection: FlowSelection;
     private renderOptions: RenderOptions;
     private lastSignature: string = "";
     private rafPending: boolean = false;
+    private hoverScheduled: boolean = false;
+    private hoverPoint: { x: number; y: number } | null = null;
 
     private readonly scheduleRender = (): void => {
         if (this.rafPending) {
@@ -81,11 +85,47 @@ export class Visual implements IVisual {
         });
     };
 
+    /** Clic sur une flèche : sélection (Ctrl, Maj ou Cmd pour en ajouter). Clic ailleurs : efface la sélection. */
+    private readonly onMapClick = (e: maplibregl.MapMouseEvent): void => {
+        const key = this.flowRenderer.hitTest(e.point.x, e.point.y);
+        if (key === null) {
+            this.selection.clear();
+            return;
+        }
+        const ev = e.originalEvent;
+        this.selection.select(key, ev.ctrlKey || ev.metaKey || ev.shiftKey);
+    };
+
+    private readonly onMapContextMenu = (e: maplibregl.MapMouseEvent): void => {
+        e.originalEvent.preventDefault();
+        const key = this.flowRenderer.hitTest(e.point.x, e.point.y);
+        this.selection.showContextMenu(key, e.originalEvent.clientX, e.originalEvent.clientY);
+    };
+
+    /** Curseur « main » au survol d'une flèche ; calcul regroupé une fois par image. */
+    private readonly onMapMouseMove = (e: maplibregl.MapMouseEvent): void => {
+        this.hoverPoint = { x: e.point.x, y: e.point.y };
+        if (this.hoverScheduled) {
+            return;
+        }
+        this.hoverScheduled = true;
+        requestAnimationFrame(() => {
+            this.hoverScheduled = false;
+            const p = this.hoverPoint;
+            if (!p) {
+                return;
+            }
+            const key = this.flowRenderer.hitTest(p.x, p.y);
+            this.mapManager.getMap().getCanvas().style.cursor = key !== null ? "pointer" : "";
+        });
+    };
+
     constructor(options: VisualConstructorOptions) {
         configureWorker();
         this.formattingSettingsService = new FormattingSettingsService();
         this.formattingSettings = new VisualFormattingSettingsModel();
         this.formatValue = createValueFormatter(options.host.locale);
+        this.selection = new FlowSelection(options.host, () => this.refresh());
 
         const root = document.createElement("div");
         root.style.position = "relative";
@@ -145,6 +185,9 @@ export class Visual implements IVisual {
         // Le cache de projection est enregistré avant : il est donc vidé avant chaque nouveau rendu.
         map.on("move", this.scheduleRender);
         map.on("resize", this.scheduleRender);
+        map.on("click", this.onMapClick);
+        map.on("contextmenu", this.onMapContextMenu);
+        map.on("mousemove", this.onMapMouseMove);
     }
 
     public update(options: VisualUpdateOptions): void {
@@ -173,6 +216,7 @@ export class Visual implements IVisual {
             truncated = result.truncated;
             flowCount = result.flows.length;
             this.flowRenderer.setFlows(result.flows);
+            this.selection.setFlows(options.dataViews?.[0]?.table, result.flows);
             this.renderOptions = this.computeRenderOptions();
 
             // Recadrage automatique uniquement quand les flux affichés changent (données ou filtres).
@@ -205,8 +249,17 @@ export class Visual implements IVisual {
         const map = this.mapManager.getMap();
         map.off("move", this.scheduleRender);
         map.off("resize", this.scheduleRender);
+        map.off("click", this.onMapClick);
+        map.off("contextmenu", this.onMapContextMenu);
+        map.off("mousemove", this.onMapMouseMove);
         this.projection.dispose();
         this.mapManager.destroy();
+    }
+
+    /** Redessine après un changement de sélection. */
+    private refresh(): void {
+        this.renderOptions = this.computeRenderOptions();
+        this.scheduleRender();
     }
 
     private computeRenderOptions(): RenderOptions {
@@ -222,7 +275,9 @@ export class Visual implements IVisual {
             showLabels: l.show.value,
             labelFontSize: clamp(l.fontSize.value, 6, 32),
             labelMinLength: clamp(l.minLength.value, 0, 1000),
-            formatValue: this.formatValue
+            formatValue: this.formatValue,
+            selectedKeys: this.selection.getSelectedKeys(),
+            dimFactor: clamp(a.dimOpacity.value, 0, 100) / 100
         };
     }
 

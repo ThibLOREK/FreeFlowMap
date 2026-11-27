@@ -64,6 +64,13 @@ class ArrowsCardSettings extends formattingSettings.SimpleCard {
         value: 70
     });
 
+    /** Opacité relative des flux non sélectionnés, en pourcentage de l'opacité normale (0 à 100). */
+    public dimOpacity = new formattingSettings.NumUpDown({
+        name: "dimOpacity",
+        displayName: "Opacité des flux non sélectionnés (%)",
+        value: 25
+    });
+
     /** En pourcentage de la distance départ-arrivée (0 à 60). */
     public curvature = new formattingSettings.NumUpDown({
         name: "curvature",
@@ -101,6 +108,7 @@ class ArrowsCardSettings extends formattingSettings.SimpleCard {
     public slices: Array<formattingSettings.Slice> = [
         this.color,
         this.opacity,
+        this.dimOpacity,
         this.curvature,
         this.minThickness,
         this.maxThickness,
